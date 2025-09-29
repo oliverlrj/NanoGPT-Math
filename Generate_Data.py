@@ -69,75 +69,42 @@ def generate_raw_problems(n):
 
 # --- 2. NEGATIVE RESPONSE GENERATOR (Task 1: Step 2) ---
 
-def load_sft_model(path, device, expected_vocab_size): 
-    """Loads the pre-trained SFT model and handles vocabulary resizing."""
+def load_sft_model(path, device, ):
+    """Loads the pre-trained SFT model using a direct checkpoint loading approach."""
     print(f"Loading SFT model from {path} on {device}...")
     try:
-        # Load the checkpoint dictionary
         ckpt = torch.load(path, map_location=device)
     except FileNotFoundError:
         print(f"ERROR: SFT model not found at {path}. Have you run python sft/train.py or fixed the file path?")
         raise
-    
-    # 1. Unwrap the state dictionary (Handles '_orig_mod.' prefix)
-    state_dict = ckpt['model']
-    unwrapped_state_dict = {}
-    for k, v in state_dict.items():
-        if k.startswith('_orig_mod.'):
-            unwrapped_state_dict[k[len('_orig_mod.'):]] = v
-        else:
-            unwrapped_state_dict[k] = v
 
-    # 2. Override the vocab size in the config to match the tokenizer (50257 for gpt2)
     gptconf = GPTConfig(**ckpt['model_args'])
+    gpt = GPT(gptconf)
+    state_dict = ckpt['model']
+    unwanted_prefix = '_orig_mod.'
+    for k in list(state_dict.keys()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    gpt.load_state_dict(state_dict)
+    gpt.to(device).train()
     
-    old_vocab_size = gptconf.vocab_size
-    if old_vocab_size != expected_vocab_size:
-        print(f"Warning: Model vocab size ({old_vocab_size}) corrected to match tokenizer's size: {expected_vocab_size}.")
-        gptconf.vocab_size = expected_vocab_size 
-
-    # 3. Initialize the model with the large vocab size
-    model = GPT(gptconf)
-    
-    # 4. Manually handle the size mismatch for embedding and head layers
-    temp_state_dict = {}
-    
-    for k, v in unwrapped_state_dict.items():
-        if k in ['transformer.wte.weight', 'lm_head.weight']:
-            # Mismatched layer detected (old_vocab_size vs expected_vocab_size)
-            
-            # Get the new, larger tensor from the model (size expected_vocab_size)
-            new_v = model.state_dict()[k].clone()
-            
-            # Copy the old (smaller) weights to the top part of the new tensor
-            new_v[:old_vocab_size].copy_(v)
-            temp_state_dict[k] = new_v
-            print(f"INFO: Successfully copied old weights for {k} into the expanded model.")
-        else:
-            # All other layers (sizes should match)
-            temp_state_dict[k] = v
-
-    # Load the fixed state dict (must be strict=True now that sizes match)
-    model.load_state_dict(temp_state_dict, strict=True)
-    
-    model.to(device)
-    model.eval()
     print("SFT model loaded successfully.")
-    return model
+    return gpt
 
 
 def encode(s): return [stoi[c] for c in s if c in stoi]
 def decode(l): return ''.join([itos[i] for i in l])
 
-def generate_negative_response(problem, model, encode, decode, device, max_tokens=64):
+def generate_negative_response(problem, model, encode, decode, device, max_tokens=200):
     """Uses the SFT model to generate a typically incorrect/default response."""
     input_ids = torch.tensor([encode(problem)], dtype=torch.long, device=device)
     with torch.no_grad():
         output_ids, _ = model.generate(
             input_ids,
             max_new_tokens=max_tokens,
-            temperature=0.001,
-            top_k=50
+            temperature=0.8,
+            top_k=200
+
         )
     response = decode(output_ids[0].tolist())
     negative_text = response[len(problem):].strip()
@@ -169,11 +136,10 @@ def solve_and_format_positive_response(problem):
             return f"{problem} The answer is {answer} because {expression} equals {answer}."
 
     # ALGEBRA PROBLEM HANDLING: Pattern for $A op x = C, x=?$
-    match_algebra = re.match(r"(\d+)([+\-])x=(\d+), x=\?", problem)
+    match_algebra = re.match(r"(\d+)([+\-])x=(\-?\d+), x=\?", problem)
     if match_algebra:
         A, op, C = match_algebra.groups()
         A, C = int(A), int(C)
-        
         if op == '+': # x = C - A
             x = C - A
             return f"{problem} The answer is {x} because {C} minus {A} equals {x}."
@@ -191,7 +157,7 @@ def main():
 
     
     try:
-        model = load_sft_model(SFT_MODEL_PATH, DEVICE, len(stoi)) 
+        model = load_sft_model(SFT_MODEL_PATH, DEVICE) 
     except FileNotFoundError:
         print("\n*** ACTION REQUIRED: Please ensure sft/gpt.pt exists and try again. ***")
         return
@@ -212,12 +178,12 @@ def main():
             print(f"Processing problem {i}/{NUM_PROBLEMS_TO_GENERATE}...")
 
         positive_response = solve_and_format_positive_response(problem)
-        if positive_response:
-            negative_response = generate_negative_response(problem, model, encode, decode, DEVICE)
-            dpo_dataset.append({
-                "negative": negative_response,
-                "positive": positive_response
-            })
+        #if positive_response:
+        negative_response = generate_negative_response(problem, model, encode, decode, DEVICE)
+        dpo_dataset.append({
+            "negative": negative_response,
+            "positive": positive_response
+        })
 
     # --- Step 4: Save Data ---
     print(f"\nSuccessfully generated {len(dpo_dataset)} complete pairs.")
