@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 from model import GPT, GPTConfig 
 
 # --- CONFIGURATION ---
-NUM_PROBLEMS_TO_GENERATE = 100 
+NUM_PROBLEMS_TO_GENERATE = 100_000 
 OUTPUT_FILE = "data/pos_neg_pairs.json"
 SFT_MODEL_PATH = "sft/gpt.pt"
 # Check if CUDA is available, otherwise use CPU
