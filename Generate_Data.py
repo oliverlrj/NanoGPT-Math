@@ -35,24 +35,36 @@ def generate_arithmetic_problem():
         B = random.randint(2, 20)
     
     elif op == '/':
-        result = random.randint(2, 10)
+        result = random.randint(2, 20)  # Increased from 10 to 20
         B = random.randint(2, 10)
         A = result * B 
 
     return f"{A}{op}{B}=?"
 
 def generate_algebra_problem():
-    """Generates a simple linear algebra problem (A op x = C, x=?)."""
-    op = random.choice(['+', '-'])
-    X = random.randint(1, 50)
-    B = random.randint(10, 100)
+    """Generates a simple linear algebra problem (A op x = C, x=? or x op A = C, x=?)."""
+    op = random.choice(['+', '-', '*', '/'])
     
     if op == '+':
+        X = random.randint(1, 50)
+        B = random.randint(10, 100)
         C = X + B
         query = f"{B}+x={C}, x=?"
-    else:
+    elif op == '-':
+        X = random.randint(1, 50)
+        B = random.randint(10, 100)
         C = B - X
         query = f"{B}-x={C}, x=?"
+    elif op == '*':
+        X = random.randint(2, 20)
+        B = random.randint(2, 20)
+        C = X * B
+        query = f"x*{B}={C}, x=?"
+    elif op == '/':
+        X = random.randint(2, 10)
+        B = random.randint(2, 20)
+        C = X * B
+        query = f"x*{B}={C}, x=?"
         
     return query
 
@@ -135,10 +147,10 @@ def solve_and_format_positive_response(problem):
         if answer is not None:
             return f"{problem} The answer is {answer} because {expression} equals {answer}."
 
-    # ALGEBRA PROBLEM HANDLING: Pattern for $A op x = C, x=?$
-    match_algebra = re.match(r"(\d+)([+\-])x=(\-?\d+), x=\?", problem)
-    if match_algebra:
-        A, op, C = match_algebra.groups()
+    # ALGEBRA PROBLEM HANDLING: Pattern for $A op x = C, x=?$ or $x op A = C, x=?$
+    match_algebra_add_sub = re.match(r"(\d+)([+\-])x=(\-?\d+), x=\?", problem)
+    if match_algebra_add_sub:
+        A, op, C = match_algebra_add_sub.groups()
         A, C = int(A), int(C)
         if op == '+': # x = C - A
             x = C - A
@@ -146,6 +158,14 @@ def solve_and_format_positive_response(problem):
         elif op == '-': # x = A - C
             x = A - C
             return f"{problem} The answer is {x} because {A} minus {C} equals {x}."
+    
+    # ALGEBRA MULTIPLICATION: Pattern for $x * A = C, x=?$
+    match_algebra_mult = re.match(r"x\*(\d+)=(\d+), x=\?", problem)
+    if match_algebra_mult:
+        A, C = match_algebra_mult.groups()
+        A, C = int(A), int(C)
+        x = C // A
+        return f"{problem} The answer is {x} because {C} divided by {A} equals {x}."
 
     return None 
 
